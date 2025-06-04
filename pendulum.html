@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Simulador de péndulo físico</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+    #controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    canvas {
+      border: 1px solid #000;
+      margin: 10px;
+    }
+    #info {
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Simulador de péndulo físico</h1>
+  <div id="controls">
+    <label>Longitud ℓ (m):
+      <input type="number" id="length" value="1" min="0.1" step="0.1">
+    </label>
+    <label>Ángulo inicial θ₀ (°):
+      <input type="number" id="theta0" value="20" min="0" max="90" step="1">
+    </label>
+    <label>Gravedad g (m/s²):
+      <input type="number" id="gravity" value="9.81" min="0.1" step="0.1">
+    </label>
+    <label>Masa m (kg):
+      <input type="number" id="mass" value="1" min="0.1" step="0.1">
+    </label>
+    <label>Rozamiento b:
+      <input type="number" id="damping" value="0" min="0" step="0.1">
+    </label>
+  </div>
+  <button id="startBtn">Iniciar</button>
+  <button id="pauseBtn">Pausar</button>
+  <button id="resetBtn">Reiniciar</button>
+  <div>
+    <canvas id="pendulumCanvas" width="600" height="400"></canvas>
+  </div>
+  <div>
+    <canvas id="energyCanvas" width="600" height="400"></canvas>
+  </div>
+  <!-- Información numérica para ayudar a comprender la dinámica -->
+  <div id="info">
+    <p>Ángulo θ: <span id="info-angle">0</span> rad</p>
+    <p>Velocidad angular ω: <span id="info-omega">0</span> rad/s</p>
+    <p>Energía cinética K: <span id="info-K">0</span> J</p>
+    <p>Energía potencial U: <span id="info-U">0</span> J</p>
+    <p>Energía total E: <span id="info-E">0</span> J</p>
+  </div>
+  <script>
+    // Variables del sistema
+    const dt = 0.01; // paso de tiempo fijo para el integrador (≈0.01 s)
+    let ell, theta, omega, theta0;
+    let g, m, b;
+    let t = 0;
+    let running = false;
+    let lastTimestamp = null;
+    let energyData = [];
+
+    // Referencias de DOM
+    const lengthInput = document.getElementById('length');
+    const thetaInput = document.getElementById('theta0');
+    const gravityInput = document.getElementById('gravity');
+    const massInput = document.getElementById('mass');
+    const dampingInput = document.getElementById('damping');
+    const pendulumCanvas = document.getElementById('pendulumCanvas');
+    const energyCanvas = document.getElementById('energyCanvas');
+    const pCtx = pendulumCanvas.getContext('2d');
+    const eCtx = energyCanvas.getContext('2d');
+    const angleSpan = document.getElementById('info-angle');
+    const omegaSpan = document.getElementById('info-omega');
+    const kSpan = document.getElementById('info-K');
+    const uSpan = document.getElementById('info-U');
+    const eSpan = document.getElementById('info-E');
+
+    document.getElementById('startBtn').addEventListener('click', startSimulation);
+    document.getElementById('pauseBtn').addEventListener('click', pauseSimulation);
+    document.getElementById('resetBtn').addEventListener('click', resetSimulation);
+
+    // Reiniciar al cambiar parámetros
+    [lengthInput, thetaInput, gravityInput, massInput, dampingInput].forEach(el => {
+      el.addEventListener('change', () => {
+        if (running) pauseSimulation();
+        resetSimulation();
+      });
+    });
+
+    // rungeKuttaStep: avanza la simulación un paso Δt usando RK4
+    function rungeKuttaStep() {
+      const deriv = (th, om) => {
+        // θ' = ω
+        // ω' = -(g/ℓ) sin(θ) - (b/m) ω (término de rozamiento viscoso)
+        return [om, -(g / ell) * Math.sin(th) - (b / m) * om];
+      };
+
+      const [k1_th, k1_om] = deriv(theta, omega);
+      const [k2_th, k2_om] = deriv(theta + 0.5 * dt * k1_th, omega + 0.5 * dt * k1_om);
+      const [k3_th, k3_om] = deriv(theta + 0.5 * dt * k2_th, omega + 0.5 * dt * k2_om);
+      const [k4_th, k4_om] = deriv(theta + dt * k3_th, omega + dt * k3_om);
+
+      theta += (dt / 6) * (k1_th + 2 * k2_th + 2 * k3_th + k4_th);
+      omega += (dt / 6) * (k1_om + 2 * k2_om + 2 * k3_om + k4_om);
+      t += dt;
+
+      const v = ell * omega;
+      const K = 0.5 * m * v * v; // energía cinética
+      const U = m * g * ell * (1 - Math.cos(theta)); // potencial
+      energyData.push({ t, K, U, E: K + U });
+      if (energyData.length > 1000) energyData.shift();
+    }
+
+    function drawPendulum() {
+      pCtx.clearRect(0, 0, pendulumCanvas.width, pendulumCanvas.height);
+      const originX = pendulumCanvas.width / 2;
+      const originY = 50; // punto de sujeción
+
+      // Escala en píxeles para que la longitud ℓ quepa en el canvas
+      const pixelLength = Math.min(pendulumCanvas.height - 60, ell * 100);
+      const x = originX + pixelLength * Math.sin(theta);
+      const y = originY + pixelLength * Math.cos(theta);
+
+      // varilla
+      pCtx.beginPath();
+      pCtx.moveTo(originX, originY);
+      pCtx.lineTo(x, y);
+      pCtx.strokeStyle = '#000';
+      pCtx.lineWidth = 2;
+      pCtx.stroke();
+
+      // bola
+      pCtx.beginPath();
+      pCtx.arc(x, y, 10, 0, 2 * Math.PI);
+      pCtx.fillStyle = 'red';
+      pCtx.fill();
+
+      // punto de sujeción
+      pCtx.beginPath();
+      pCtx.arc(originX, originY, 5, 0, 2 * Math.PI);
+      pCtx.fillStyle = '#000';
+      pCtx.fill();
+    }
+
+    function drawEnergyGraphs() {
+      eCtx.clearRect(0, 0, energyCanvas.width, energyCanvas.height);
+      // Ejes principales
+      eCtx.beginPath();
+      eCtx.moveTo(40, 10);
+      eCtx.lineTo(40, energyCanvas.height - 20);
+      eCtx.lineTo(energyCanvas.width - 10, energyCanvas.height - 20);
+      eCtx.strokeStyle = '#000';
+      eCtx.stroke();
+
+      // Etiquetas de los ejes
+      eCtx.font = '12px sans-serif';
+      eCtx.fillText('t (s)', energyCanvas.width / 2, energyCanvas.height - 5);
+      eCtx.save();
+      eCtx.translate(15, energyCanvas.height / 2);
+      eCtx.rotate(-Math.PI / 2);
+      eCtx.fillText('Energ\u00eda (J)', 0, 0);
+      eCtx.restore();
+
+      if (energyData.length < 2) return;
+      const tMax = energyData[energyData.length - 1].t;
+      let eMax = 0;
+      energyData.forEach(d => { eMax = Math.max(eMax, d.K, d.U, d.E); });
+      const xScale = (energyCanvas.width - 50) / tMax;
+      const yScale = (energyCanvas.height - 30) / eMax;
+
+      // Líneas de referencia cada 1/4 del rango
+      eCtx.strokeStyle = '#ddd';
+      eCtx.beginPath();
+      for (let i = 1; i <= 4; i++) {
+        const y = energyCanvas.height - 20 - (eMax * i / 4) * yScale;
+        eCtx.moveTo(40, y);
+        eCtx.lineTo(energyCanvas.width - 10, y);
+        const x = 40 + (tMax * i / 4) * xScale;
+        eCtx.moveTo(x, energyCanvas.height - 20);
+        eCtx.lineTo(x, 10);
+      }
+      eCtx.stroke();
+
+      // marcas numéricas
+      eCtx.fillStyle = '#000';
+      for (let i = 0; i <= 4; i++) {
+        const x = 40 + (tMax * i / 4) * xScale;
+        eCtx.fillText((tMax * i / 4).toFixed(1), x - 10, energyCanvas.height - 25);
+        const y = energyCanvas.height - 20 - (eMax * i / 4) * yScale;
+        eCtx.fillText((eMax * i / 4).toFixed(1), 5, y + 3);
+      }
+
+      // curva K(t) en azul
+      eCtx.beginPath();
+      eCtx.strokeStyle = 'blue';
+      energyData.forEach((d, i) => {
+        const x = 40 + d.t * xScale;
+        const y = energyCanvas.height - 20 - d.K * yScale;
+        if (i === 0) eCtx.moveTo(x, y); else eCtx.lineTo(x, y);
+      });
+      eCtx.stroke();
+
+      // curva U(t) en verde
+      eCtx.beginPath();
+      eCtx.strokeStyle = 'green';
+      energyData.forEach((d, i) => {
+        const x = 40 + d.t * xScale;
+        const y = energyCanvas.height - 20 - d.U * yScale;
+        if (i === 0) eCtx.moveTo(x, y); else eCtx.lineTo(x, y);
+      });
+      eCtx.stroke();
+
+      // curva E_total opcional en rojo
+      eCtx.beginPath();
+      eCtx.strokeStyle = 'red';
+      energyData.forEach((d, i) => {
+        const x = 40 + d.t * xScale;
+        const y = energyCanvas.height - 20 - d.E * yScale;
+        if (i === 0) eCtx.moveTo(x, y); else eCtx.lineTo(x, y);
+      });
+      eCtx.stroke();
+      // Con b=0, esta curva debería ser constante; con rozamiento b>0 desciende gradualmente.
+    }
+
+    // updateInfo: muestra valores instantáneos de θ, ω y energías
+    function updateInfo() {
+      const angleDeg = (theta * 180 / Math.PI).toFixed(2);
+      const v = ell * omega;
+      const K = 0.5 * m * v * v;
+      const U = m * g * ell * (1 - Math.cos(theta));
+      angleSpan.textContent = angleDeg;
+      omegaSpan.textContent = omega.toFixed(2);
+      kSpan.textContent = K.toFixed(2);
+      uSpan.textContent = U.toFixed(2);
+      eSpan.textContent = (K + U).toFixed(2);
+    }
+
+    function animate(timestamp) {
+      if (!running) return;
+      if (!lastTimestamp) lastTimestamp = timestamp;
+      let delta = (timestamp - lastTimestamp) / 1000;
+      lastTimestamp = timestamp;
+      // integrar en pasos de dt
+      while (delta > dt) {
+        rungeKuttaStep();
+        delta -= dt;
+      }
+      drawPendulum();
+      drawEnergyGraphs();
+      updateInfo();
+      requestAnimationFrame(animate);
+    }
+
+    function startSimulation() {
+      if (!running) {
+        running = true;
+        lastTimestamp = null;
+        requestAnimationFrame(animate);
+      }
+    }
+
+    function pauseSimulation() {
+      running = false;
+    }
+
+    function resetSimulation() {
+      // obtención y validación de valores de los inputs
+      ell = parseFloat(lengthInput.value);
+      if (ell <= 0) ell = 1;
+      theta0 = parseFloat(thetaInput.value);
+      if (theta0 < 0 || theta0 > 90) theta0 = 20;
+      theta0 = theta0 * Math.PI / 180; // conversión a radianes
+      g = parseFloat(gravityInput.value);
+      if (g <= 0) g = 9.81;
+      m = parseFloat(massInput.value);
+      if (m <= 0) m = 1;
+      b = parseFloat(dampingInput.value);
+      if (b < 0) b = 0;
+
+      theta = theta0;
+      omega = 0;
+      t = 0;
+      energyData = [];
+
+      drawPendulum();
+      drawEnergyGraphs();
+      updateInfo();
+    }
+
+    // Configuración inicial
+    resetSimulation();
+  </script>
+</body>
+</html>
