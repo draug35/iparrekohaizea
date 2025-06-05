@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Simulador de péndulo físico</title>
+<style>
+body { font-family: Arial, sans-serif; text-align: center; }
+#controls { margin-bottom: 10px; }
+canvas { border: 1px solid #ccc; display: block; margin: 10px auto; }
+label { margin-right: 5px; }
+</style>
+</head>
+<body>
+<h1>Simulador de péndulo físico</h1>
+<div id="controls">
+<label>Longitud (m): <input type="number" id="length" value="1" min="0.1" step="0.1"></label>
+<label>Ángulo inicial (°): <input type="number" id="angle" value="30" min="0" max="90" step="1"></label>
+<label>Gravedad (m/s²): <input type="number" id="gravity" value="9.81" min="0.1" step="0.1"></label>
+<label>Masa (kg): <input type="number" id="mass" value="1" min="0.1" step="0.1"></label>
+<label>Rozamiento b: <input type="number" id="damping" value="0" min="0" step="0.1"></label>
+<button id="startBtn">Iniciar</button>
+<button id="pauseBtn">Pausar</button>
+<button id="resetBtn">Reiniciar</button>
+</div>
+<canvas id="pendulumCanvas" width="600" height="400"></canvas>
+<canvas id="energyCanvas" width="600" height="200"></canvas>
+<canvas id="phaseCanvas" width="600" height="200"></canvas>
+<p>El primer gráfico muestra el péndulo en movimiento, el segundo la evolución de las energías y el tercero su trayectoria en el espacio de fases.</p>
+<script>
+// Parametros de simulacion
+let l, g, m, b, theta0;
+let theta, omega, t;
+const dt = 0.01;
+let running = false;
+const pendulumCanvas = document.getElementById('pendulumCanvas');
+const pCtx = pendulumCanvas.getContext('2d');
+const energyCanvas = document.getElementById('energyCanvas');
+const eCtx = energyCanvas.getContext('2d');
+const phaseCanvas = document.getElementById('phaseCanvas');
+const phCtx = phaseCanvas.getContext('2d');
+const times = [];
+const kinEnergy = [];
+const potEnergy = [];
+const thetaData = [];
+const omegaData = [];
+function init() {
+  document.getElementById('startBtn').addEventListener('click', startSimulation);
+  document.getElementById('pauseBtn').addEventListener('click', pauseSimulation);
+  document.getElementById('resetBtn').addEventListener('click', resetSimulation);
+  resetSimulation();
+}
+function readParams() {
+  l = parseFloat(document.getElementById('length').value);
+  g = parseFloat(document.getElementById('gravity').value);
+  m = parseFloat(document.getElementById('mass').value);
+  b = parseFloat(document.getElementById('damping').value);
+  theta0 = parseFloat(document.getElementById('angle').value) * Math.PI / 180;
+}
+function startSimulation() {
+  if (!running) {
+    readParams();
+    running = true;
+    requestAnimationFrame(loop);
+  }
+}
+function pauseSimulation() {
+  running = false;
+}
+function resetSimulation() {
+  running = false;
+  readParams();
+  t = 0;
+  theta = theta0;
+  omega = 0;
+  times.length = 0;
+  kinEnergy.length = 0;
+  potEnergy.length = 0;
+  thetaData.length = 0;
+  omegaData.length = 0;
+  clearCanvas(eCtx, energyCanvas);
+  clearCanvas(phCtx, phaseCanvas);
+  drawPendulum();
+}
+// RK4 integration step
+function rungeKuttaStep() {
+  const f1 = omega;
+  const g1 = -(g / l) * Math.sin(theta) - b * omega;
+  const f2 = omega + 0.5 * dt * g1;
+  const g2 = -(g / l) * Math.sin(theta + 0.5 * dt * f1) - b * (omega + 0.5 * dt * g1);
+  const f3 = omega + 0.5 * dt * g2;
+  const g3 = -(g / l) * Math.sin(theta + 0.5 * dt * f2) - b * (omega + 0.5 * dt * g2);
+  const f4 = omega + dt * g3;
+  const g4 = -(g / l) * Math.sin(theta + dt * f3) - b * (omega + dt * g3);
+  theta += dt / 6 * (f1 + 2 * f2 + 2 * f3 + f4);
+  omega += dt / 6 * (g1 + 2 * g2 + 2 * g3 + g4);
+}
+function update() {
+  rungeKuttaStep();
+  t += dt;
+  const K = 0.5 * m * Math.pow(l * omega, 2);
+  const U = m * g * l * (1 - Math.cos(theta));
+  times.push(t);
+  kinEnergy.push(K);
+  potEnergy.push(U);
+  thetaData.push(theta);
+  omegaData.push(omega);
+}
+function clearCanvas(ctx, canvas) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+function drawPendulum() {
+  clearCanvas(pCtx, pendulumCanvas);
+  const originX = pendulumCanvas.width / 2;
+  const originY = 50;
+  const x = originX + l * 100 * Math.sin(theta);
+  const y = originY + l * 100 * Math.cos(theta);
+  pCtx.beginPath();
+  pCtx.moveTo(originX, originY);
+  pCtx.lineTo(x, y);
+  pCtx.stroke();
+  pCtx.beginPath();
+  pCtx.arc(x, y, 10, 0, 2 * Math.PI);
+  pCtx.fillStyle = 'red';
+  pCtx.fill();
+}
+function drawEnergyGraphs() {
+  clearCanvas(eCtx, energyCanvas);
+  const width = energyCanvas.width;
+  const height = energyCanvas.height;
+  const n = times.length;
+  if (n < 2) return;
+  const maxTime = times[n - 1];
+  const energies = kinEnergy.concat(potEnergy);
+  const maxEnergy = Math.max(...energies);
+  eCtx.beginPath();
+  eCtx.moveTo(40, 10);
+  eCtx.lineTo(40, height - 20);
+  eCtx.lineTo(width - 10, height - 20);
+  eCtx.stroke();
+  eCtx.strokeStyle = 'blue';
+  eCtx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const x = 40 + (times[i] / maxTime) * (width - 50);
+    const y = height - 20 - (kinEnergy[i] / maxEnergy) * (height - 30);
+    if (i === 0) eCtx.moveTo(x, y); else eCtx.lineTo(x, y);
+  }
+  eCtx.stroke();
+  eCtx.strokeStyle = 'green';
+  eCtx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const x = 40 + (times[i] / maxTime) * (width - 50);
+    const y = height - 20 - (potEnergy[i] / maxEnergy) * (height - 30);
+    if (i === 0) eCtx.moveTo(x, y); else eCtx.lineTo(x, y);
+  }
+  eCtx.stroke();
+}
+
+function drawPhaseSpace() {
+  clearCanvas(phCtx, phaseCanvas);
+  const width = phaseCanvas.width;
+  const height = phaseCanvas.height;
+  const n = thetaData.length;
+  if (n < 2) return;
+  const thetaValues = thetaData.concat();
+  const omegaValues = omegaData.concat();
+  const maxTheta = Math.max(...thetaValues.map(Math.abs));
+  const maxOmega = Math.max(...omegaValues.map(Math.abs));
+  phCtx.beginPath();
+  phCtx.moveTo(40, 10);
+  phCtx.lineTo(40, height - 20);
+  phCtx.lineTo(width - 10, height - 20);
+  phCtx.stroke();
+  phCtx.strokeStyle = 'purple';
+  phCtx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const x = 40 + (thetaData[i] / (2 * maxTheta)) * (width - 50) + (width - 50) / 2;
+    const y = height - 20 - (omegaData[i] / (2 * maxOmega)) * (height - 30) - (height - 30) / 2;
+    if (i === 0) phCtx.moveTo(x, y); else phCtx.lineTo(x, y);
+  }
+  phCtx.stroke();
+}
+function loop() {
+  if (running) {
+    update();
+    drawPendulum();
+    drawEnergyGraphs();
+    drawPhaseSpace();
+    requestAnimationFrame(loop);
+  }
+}
+window.onload = init;
+</script>
+</body>
+</html>
